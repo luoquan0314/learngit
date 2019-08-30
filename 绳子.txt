@@ -1,0 +1,203 @@
+动画大概是这样，这里用于束缚绳子是另一个物件，软体性没有电缆绳那么大，与绳子之间相互穿过的现象出现概率也比较小
+现在三个问题
+不能够系紧，想要将束缚绳子打结一定会互相穿过，电缆绳也容易在这个过程中穿过束缚绳
+和手套交换还没做好，现在绳子已能和鼠标交互，和手套交互解决方法在官方论坛找到了，还没付诸实施
+绳子数量多的化话，系统可能会带不动
+
+
+现在系紧问题，我是想不通过打结，而是通过一个球或者方块，将束缚绳两端固定在球上
+
+                        if (ObiColliderBase.idToCollider[contact.other].GetComponent<ObiCollider>() == character) 
+                        {
+                            number = contact.particle;
+                            ObiSolver.ParticleInActor particleInActor = solver.particleToActor[contact.particle];
+
+                            rope.PinConstraints.RemoveFromSolver(null);
+                            ObiPinConstraintBatch batch = (ObiPinConstraintBatch)rope.PinConstraints.GetFirstBatch();
+                            batch.AddConstraint(particleLocation, character, Vector3.up * ropeOffset, Quaternion.Euler(0, 30, 0), 1);
+                            rope.PinConstraints.AddToSolver(null);
+                        }
+						
+让手套模型生成obiCollider组件
+  将如下代码添加到physicsHand脚本处或替换
+        public override void Start()
+        {
+            base.Start();
+            _initialThumbQuaternion = PhalangesGameObjects[1].transform.localRotation;
+            _physicsHand = Hand as PhysicsHand;
+            if (_physicsHand == null)
+                Debug.LogError("PhysicsFinger needs a PhysicsHand");
+
+            for (var i = 1; i <= 2; i++)
+            {
+                if (Index == FingerIndex.thumb && i == 1)
+                {
+                    ConstraintThumbPosition(PhalangesGameObjects[i]);
+                    ConstraintThumbRotation(PhalangesGameObjects[i]);
+                    continue;
+                }
+
+                GameObject holder = PhalangesGameObjects[i];
+
+                GameObject copy = new GameObject(PhalangesGameObjects[i].name);
+                //copy.transform.parent = PhalangesGameObjects[i].transform.parent;
+                copy.transform.parent = Hand.transform;
+                copy.transform.position = PhalangesGameObjects[i].transform.position;
+                copy.transform.rotation = PhalangesGameObjects[i].transform.rotation;
+
+                Collider targetCollider = PhalangesGameObjects[i].GetComponent<Collider>();
+                Destroy(targetCollider);//2
+                CopyCollider(targetCollider, copy);
+                PhalangesGameObjects[i] = copy;
+                //Debug.Log(PhalangesGameObjects[i].name);
+
+                //为新建的手指模型添加obiCollider
+                if (PhalangesGameObjects[i].name == "index_01_r" || PhalangesGameObjects[i].name == "index_02_r") //可以改进，可以所有都添加
+                {
+                    copy.AddComponent<Obi.ObiCollider>();//可以设置obiCollider的初始参数
+                }
+
+                // Get the rigidbody where it should connect to
+                var connectedBody = ConnectedBody(i);
+
+                // Add a hingejoint to the gameobject
+                if (Index == FingerIndex.thumb && DeviceType != device_type_t.GLOVE_LEFT)
+                    _joints[i] = AddHingeJoint(PhalangesGameObjects[i],
+                        new Vector3(0, 0, 1), connectedBody);
+                else if (Index == FingerIndex.thumb)
+                    _joints[i] = AddHingeJoint(PhalangesGameObjects[i],
+                        new Vector3(0, 0, 1), connectedBody);
+                else
+                    _joints[i] = AddHingeJoint(PhalangesGameObjects[i],
+                        new Vector3(0, 0, 1), connectedBody);
+
+                _phalanges[i] = HandFactory.GetPhalange(PhalangesGameObjects[i], Index, i, DeviceType);
+                PhalangesGameObjects[i].GetComponent<Rigidbody>().maxAngularVelocity = 100f;
+
+                // Add limits to the hingejoints of the finger
+                if (DeviceType == device_type_t.GLOVE_RIGHT)
+                    ChangeJointLimit(_joints[i], -10, 120);
+                else
+                    ChangeJointLimit(_joints[i], -120, 10);
+                PhalangesGameObjects[i] = holder;
+            }
+        }
+		
+将束缚绳两端固定在球上		
+using UnityEngine;
+using System.Collections.Generic;
+using Obi;
+
+public class test : MonoBehaviour
+{
+    [SerializeField]
+    public int number;
+    private ObiRod rod;
+    public ObiCollider character;  // add player in inspector with obi collider
+    public ObiSolver solver;
+    private bool setPhase1 = false;
+    private bool setPhase2 = false;
+
+
+    void Awake()
+    {
+        rod = GetComponent<ObiRod>();
+        rod.Solver = solver;
+    }
+
+    void OnEnable()
+    {
+        solver.OnCollision += Solver_OnCollision;
+        //solver.OnCollision += Solver_OnCollision1;
+    }
+
+    void OnDisable()
+    {
+        solver.OnCollision -= Solver_OnCollision;
+        // solver.OnCollision -= Solver_OnCollision1;
+    }
+
+    void Solver_OnCollision(object sender, ObiSolver.ObiCollisionEventArgs e)
+    {
+        foreach (Oni.Contact contact in e.contacts)
+        {
+            if (contact.distance < 0.01)
+            {
+                ObiSolver.ParticleInActor actor = solver.particleToActor[contact.particle];
+                if (actor.actor.name == rod.name)
+                {
+                    if (Input.GetKeyDown(KeyCode.E))
+                    {
+                        Component collider;
+                        if (ObiCollider.idToCollider.TryGetValue(contact.other, out collider))
+                        {
+                            /*
+                            var rb = ObiCollider.idToCollider[contact.other].GetComponent<ObiRigidbody>();
+                            if (rb)
+                            {
+                                Destroy(rb);
+                            }
+                            */
+                            if (ObiColliderBase.idToCollider[contact.other].GetComponent<ObiCollider>() == character)
+                            {
+                                /*取消固定
+                                    for (int i = 0; i < rod.invMasses.Length; i++)
+                                    {
+                                        if (rod.invMasses[i] == 0)
+                                        {
+                                            int particleSolverIndex = rod.particleIndices[i];
+                                            solver.invMasses[particleSolverIndex] = 1;
+                                            Debug.Log(rod.particleIndices.Length);
+                                        }
+                                    }
+                                    */
+                                if (actor.indexInActor == rod.particleIndices.Length - 1 && !setPhase1)   //绳子粒子索引最小为0，最大索引为长度减11
+                                {
+                                    Debug.Log(contact.particle);
+                                    rod.PinConstraints.RemoveFromSolver(null);
+                                    ObiPinConstraintBatch batch = rod.PinConstraints.GetFirstBatch();
+                                    batch.AddConstraint(actor.indexInActor, character, Vector3.zero, Quaternion.Euler(0, 0, 0), 1);
+                                    rod.PinConstraints.AddToSolver(null);
+                                    setPhase1 = true;
+                                }
+
+                                if (actor.indexInActor == 0 && !setPhase2)   //绳子粒子索引最小为0，最大索引为长度减11
+                                {
+                                    for (int i = 0; i < rod.invMasses.Length; i++)
+                                    {
+                                        if (rod.invMasses[i] == 0)
+                                        {
+                                            int particleSolverIndex = rod.particleIndices[i];
+                                            solver.invMasses[particleSolverIndex] = 1;
+                                        }
+                                    }
+                                    Debug.Log(contact.particle);
+                                    rod.PinConstraints.RemoveFromSolver(null);
+                                    ObiPinConstraintBatch batch = rod.PinConstraints.GetFirstBatch();
+                                    batch.AddConstraint(actor.indexInActor, character, Vector3.zero, Quaternion.Euler(0, 0, 0), 1);
+                                    rod.PinConstraints.AddToSolver(null);
+                                    setPhase2 = true;
+                                }
+                                if (setPhase1 && setPhase2)
+                                {
+                                    var obic = ObiCollider.idToCollider[contact.other].GetComponent<ObiCollider>();
+                                    int indexInSolver = rod.particleIndices[1];
+                                    obic.Phase = 1;
+                                    GetComponent<test>().enabled = false;
+                                    //ObiCollider.idToCollider[contact.other].gameObject.AddComponent<Rigidbody>();
+                                }
+                            }
+                        }
+                    }
+
+                    if (Input.GetKeyDown(KeyCode.R))
+                    {
+                        rod.PinConstraints.RemoveFromSolver(null);
+                        ObiPinConstraintBatch batch = rod.PinConstraints.GetFirstBatch();
+                        batch.BreakConstraints();
+                    }
+                }
+            }
+        }
+    }
+}
